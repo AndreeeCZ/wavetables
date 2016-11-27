@@ -20,6 +20,23 @@
 #include <iomanip>
 #include <cstdlib>
 
+#define USE_QUAD_MATH
+
+#ifdef USE_QUAD_MATH
+
+#include <quadmath.h>
+#define float __float128
+#undef M_PI
+#define M_PI M_PIq
+#define sinf sinq
+#define cosf cosq
+#define round roundq
+#define expf expq
+#define logf logq
+#endif
+
+#define FLOAT float
+
 
 using namespace std;
 
@@ -61,7 +78,7 @@ int main(int argc, char* argv[]) {
 		freq = logTable[(int)(freq*1000)];
 		// convert this to actual frequency
 		freq *= SRT/2;
-		freq += 80.f;
+		freq += 25.f;
 
 		// calculate the length of the table for freq
 		tableLength = SRT/freq;
@@ -83,8 +100,8 @@ int main(int argc, char* argv[]) {
 		}
 		prevTableLength = tableLength;
 
-		cout << freq << "Hz         ";
-		cout << "Sample Count: " << tableLength << endl;
+		cout << (double)freq << "Hz         ";
+		cout << "Sample Count: " << (double)tableLength << endl;
 
 		// allocate individual wavetables
 		BLSawTable[(int)i] = new float[(int)tableLength];
@@ -101,8 +118,8 @@ int main(int argc, char* argv[]) {
 	}
 
 
-	cout << "Sample rate: " << SRT << endl;
-	cout << endl << "Total number of floats: " << totalSampleCount << endl << "Memory taken: " << totalSampleCount*sizeof(float) << " bytes. */" << endl << endl;
+	cout << "Sample rate: " << (double)SRT << endl;
+	cout << endl << "Total number of floats: " << (double)totalSampleCount << endl << "Memory taken: " << totalSampleCount*sizeof(double)/2 << " bytes. */" << endl << endl;
 
 	int plotOffset = 0;
 	int plotOffset2 = 0;
@@ -121,11 +138,13 @@ int main(int argc, char* argv[]) {
 		float triangleAlt = 1.f;
 		float gaussPhaseRotate = 0.f;
 		freq = BLSawFreqTable[i];
-		for (int h = 1; freq<=SRT/2; h++) {
+		int totalHarmonics = 0;
+		for (int h = 1; freq<=SRT*0.5f; h++) {
 			// iterate over each harmonic to generate a a saw wave
 			//float h = 1.f;
 			freq = BLSawFreqTable[i]*h;
 
+			totalHarmonics = h;
 			PA = 0.f;
 			PAInc = 2.f*M_PI/SRT*freq;
 			int cycleSize = SRT/freq;
@@ -145,13 +164,47 @@ int main(int argc, char* argv[]) {
 				// generate a sine wave at freq
 				
 				float sine = sinf(PA)*0.4f; // the sinwave
+				float freqFraction = freq/((float)SRT*0.5f);
+				float addFilter = 1.f;
+				if (freqFraction>0.7f) {
+					addFilter = cosf((freqFraction-0.7f)*14.f);
+					//std::cout << "freq: " << freq << " fract: " << freqFraction << " filt: " << addFilter << std::endl;
+				}
+				float addFilter2 = 1.f;
+				if (freqFraction>0.65) {
+					addFilter2 = cosf((freqFraction-0.65f)*10.f);
+				}
+				if (addFilter<0.f || addFilter2<0.f) {
+                    //std::cout << "Zeroing on at " << freq << std::endl;
+                    sine = 0.f;
+                }
+				float even = 1.f;
+				if (h%2==0) {
+					even = 1.1f;
+				}
+				sine *= addFilter;
+				sine *= addFilter2;
+				sine *= even;
 				if (type == "Saw") {
 					// we go from -0.37 to 0.37
-					BLSawTable[i][s] += sine*(1.f/h)*0.5f;
+					float saw1 = sine*(1.f/sqrtf(h))*0.1f; // a nice saw
+					float saw2 = sine*(1.f/h)*0.5f; // an ugly saw
+					float saw1Coeff = 1.f;
+                    float saw2Coeff = 0.f;
+					float addFilter3 = 1.f;
+					if (freqFraction>0.5f) {
+						addFilter3 = cosf((freqFraction-0.5f)*2.f);
+					}
+					BLSawTable[i][s] += (saw1*saw1Coeff + saw2*saw2Coeff) * addFilter3 * mult;
+					
 				} else if (type == "Square") {
 					if (h%2 != 0) {
 						// we go from -0.37 to 0.37
-						BLSawTable[i][s] += sine*(1.f/h);
+						float square1 = sine*(1.f/h); // a nice square
+						float square2 = sine*(1.f/sqrtf(h))*0.3f; // an ugly square
+						float square1Coeff = 1.f;
+                        float square2Coeff = 0.f;
+						BLSawTable[i][s] += square1*square1Coeff + square2*square2Coeff;
 					}
 				} else if (type == "Triangle") {
 					if (h%2 != 0) {
@@ -189,17 +242,23 @@ int main(int argc, char* argv[]) {
 			minimums[i] = min;
 			maximums[i] = max;
 
-			std::cout << "// Minimum for " << i << ": " << min << std::endl;
-			std::cout << "// Maximum for " << i << ": " << max << std::endl;
+			//std::cout << "// Minimum for " << i << ": " << min << std::endl;
+			//std::cout << "// Maximum for " << i << ": " << max << std::endl;
 		}
 
+        #ifdef USE_QUAD_MATH
+            #undef float
+            //#define float float
+        #endif
+		
+		
 		// print all as arrays
-		cout << endl << "// fundamental at " << BLSawFreqTable[i] << "Hz, " << (int)BLSawSamplesTable[i] << " samples" << endl;
+		cout << endl << "// fundamental at " << (double)BLSawFreqTable[i] << "Hz, " << (int)BLSawSamplesTable[i] << " samples, number of harmonics: " << totalHarmonics << endl;
 		cout << "static const float BL" << type << "Table" << i << "[" << (int)tableLength << "] = {";
 		for (int s = 0; s<tableLength; s++) {
 			plotOffset++;
-			float print = BLSawTable[i][s];
-			cout << fixed << std::setprecision(10) << print << "f";
+            float print = BLSawTable[i][s];
+			cout << fixed << std::setprecision(30) << print << "f";
 			if (s<tableLength-1) {
 				cout << ", ";
 			}
@@ -210,11 +269,12 @@ int main(int argc, char* argv[]) {
 
 	float* wavetable = new float[(int)numTables];
 	//wavetable[0] = BLSawTable;
-
+    
 	cout << "// fundamental frequency for each table" << endl;
 	cout << "static const float BL" << type << "FreqTable[" << (int)numTables << "] = {";
 	for (int i=0; i<numTables; i++) {
-		cout << BLSawFreqTable[i] << "f";
+        float print = BLSawFreqTable[i];
+		cout << print << "f";
 		if (i<numTables-1) {
 			cout << ", ";
 		}
